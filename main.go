@@ -39,6 +39,9 @@ func handleKeyPress(ev termbox.Event) {
 			commandBuffer = []rune{} // Reset command buffer
 		} else if ev.Ch == 'i' {
 			mode = ModeInsert
+		} else if ev.Ch == 'a' {
+			mode = ModeInsert
+			cursorX++
 		} else if ev.Ch == 'h' {
 			moveCursorLeft()
 		} else if ev.Ch == 'j' {
