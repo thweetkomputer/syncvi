@@ -5,9 +5,15 @@ import (
 	"log"
 )
 
+const (
+	ModeNormal int8 = iota
+	ModeInsert
+	ModeCommand
+)
+
 var (
 	buffer           = []rune{}
-	mode             = "normal" // start in normal mode
+	mode             = ModeNormal // start in normal mode
 	commandBuffer    = []rune{}
 	running          = true
 	cursorX, cursorY int // Track the cursor position
@@ -27,12 +33,12 @@ func updateLineStarts() {
 
 func handleKeyPress(ev termbox.Event) {
 	switch mode {
-	case "normal":
+	case ModeNormal:
 		if ev.Ch == ':' { // Enter command mode
-			mode = "command"
+			mode = ModeCommand
 			commandBuffer = []rune{} // Reset command buffer
 		} else if ev.Ch == 'i' {
-			mode = "insert"
+			mode = ModeInsert
 		} else if ev.Ch == 'h' {
 			moveCursorLeft()
 		} else if ev.Ch == 'j' {
@@ -43,9 +49,9 @@ func handleKeyPress(ev termbox.Event) {
 			moveCursorRight()
 		}
 		// TODO: Add more keys here
-	case "insert":
+	case ModeInsert:
 		if ev.Key == termbox.KeyEsc {
-			mode = "normal"
+			mode = ModeNormal
 			if cursorX > 0 {
 				cursorX--
 			}
@@ -87,15 +93,15 @@ func handleKeyPress(ev termbox.Event) {
 			buffer = append(buffer[:insertIndex], append([]rune{ev.Ch}, buffer[insertIndex:]...)...)
 			cursorX++
 		}
-	case "command":
+	case ModeCommand:
 		if ev.Key == termbox.KeyEnter {
 			if string(commandBuffer) == "q" { // Quit command
 				termbox.Close()
 				exit()
 			}
-			mode = "normal"
+			mode = ModeNormal
 		} else if ev.Key == termbox.KeyEsc {
-			mode = "normal"
+			mode = ModeNormal
 		} else if ev.Key == termbox.KeyBackspace || ev.Key == termbox.KeyBackspace2 {
 			if len(commandBuffer) > 0 {
 				commandBuffer = commandBuffer[:len(commandBuffer)-1]
@@ -183,7 +189,7 @@ func render() {
 	}
 
 	// If in command mode, display the command buffer and ':' prompt
-	if mode == "command" {
+	if mode == ModeCommand {
 		prompt := ":"
 		for i, ch := range prompt {
 			termbox.SetCell(i, h-1, ch, termbox.ColorDefault, termbox.ColorDefault) // Display at the bottom
@@ -191,7 +197,7 @@ func render() {
 		for i, ch := range commandBuffer {
 			termbox.SetCell(i+len(prompt), h-1, ch, termbox.ColorDefault, termbox.ColorDefault) // Display command after the prompt
 		}
-	} else if mode == "insert" {
+	} else if mode == ModeInsert {
 		// Display "-- INSERT --" at the bottom
 		insert := "-- INSERT --"
 		for i, ch := range insert {
