@@ -120,7 +120,7 @@ func moveCursorUp() {
 	}
 	cursorY--
 	length := lineLength(cursorY)
-	if cursorX > length {
+	if cursorX >= length {
 		cursorX = length - 1
 	}
 }
@@ -132,7 +132,7 @@ func moveCursorDown() {
 	cursorY++
 	length := lineLength(cursorY)
 	log.Printf("length: %v", length)
-	if cursorX > length {
+	if cursorX >= length {
 		cursorX = length - 1
 	}
 }
