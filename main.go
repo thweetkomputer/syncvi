@@ -225,6 +225,7 @@ func exit() {
 }
 
 func main() {
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	err := termbox.Init()
 	if err != nil {
 		log.Fatal(err)
