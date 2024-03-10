@@ -1,8 +1,9 @@
-package main
+package editor
 
 import (
 	"github.com/nsf/termbox-go"
 	"log"
+	"os"
 )
 
 const (
@@ -12,12 +13,14 @@ const (
 )
 
 var (
-	buffer           = []rune{}
-	mode             = ModeNormal // start in normal mode
-	commandBuffer    = []rune{}
-	running          = true
-	cursorX, cursorY int // Track the cursor position
-	lineStarts       []int
+	buffer                   = []rune{}
+	mode                     = ModeNormal // start in normal mode
+	commandBuffer            = []rune{}
+	running                  = true
+	cursorX, cursorY         int // Track the cursor position
+	viewOffsetX, viewOffsetY int // Track the view offset
+	lineStarts               []int
+	filePath                 string
 )
 
 func updateLineStarts() {
@@ -41,11 +44,13 @@ func handleKeyPress(ev termbox.Event) {
 			mode = ModeInsert
 		} else if ev.Ch == 'a' {
 			mode = ModeInsert
-			cursorX++
+			if lineLength(cursorY+viewOffsetY) > 0 {
+				cursorX++
+			}
 		} else if ev.Ch == 'h' {
 			moveCursorLeft()
 		} else if ev.Ch == 'j' {
-			moveCursorDown()
+			moveCursorDown(false)
 		} else if ev.Ch == 'k' {
 			moveCursorUp()
 		} else if ev.Ch == 'l' {
@@ -55,53 +60,73 @@ func handleKeyPress(ev termbox.Event) {
 	case ModeInsert:
 		if ev.Key == termbox.KeyEsc {
 			mode = ModeNormal
-			if cursorX > 0 {
-				cursorX--
-			}
+			moveCursorLeft()
 		} else if ev.Key == termbox.KeySpace {
 			buffer = append(buffer, ' ')
+			updateLineStarts()
 			cursorX++
 		} else if ev.Key == termbox.KeyEnter {
-			insertIndex := lineStarts[cursorY] + cursorX
+			insertIndex := lineStarts[cursorY+viewOffsetY] + cursorX + viewOffsetX
 			if insertIndex > len(buffer) {
 				insertIndex = len(buffer)
 			}
 			buffer = append(buffer[:insertIndex], append([]rune{'\n'}, buffer[insertIndex:]...)...)
-			cursorY++
-			cursorX = 0
+			updateLineStarts()
+			moveCursorDown(true)
 		} else if ev.Key == termbox.KeyBackspace || ev.Key == termbox.KeyBackspace2 {
 			if len(buffer) > 0 {
 				if cursorX == 0 && cursorY > 0 {
-					newlineIndexToRemove := lineStarts[cursorY] - 1
+					newlineIndexToRemove := lineStarts[cursorY+viewOffsetY] - 1
 					if newlineIndexToRemove >= 0 && newlineIndexToRemove < len(buffer) {
 						// Remove the newline character from the buffer
 						buffer = append(buffer[:newlineIndexToRemove], buffer[newlineIndexToRemove+1:]...)
+						updateLineStarts()
 
 						// Update cursor position
 						cursorY--
-						cursorX = newlineIndexToRemove - lineStarts[cursorY]
+						cursorX = newlineIndexToRemove - lineStarts[cursorY+viewOffsetY]
 					}
 				} else if cursorX > 0 {
 					buffer = buffer[:len(buffer)-1]
-					cursorX--
+					updateLineStarts()
+					moveCursorLeft()
 				}
 			}
 		} else if ev.Ch != 0 {
 			// Calculate the insertion index
-			insertIndex := lineStarts[cursorY] + cursorX
+			insertIndex := 0
+			if len(lineStarts) > 0 {
+				insertIndex = lineStarts[cursorY+viewOffsetY] + cursorX + viewOffsetX
+			}
 			if insertIndex > len(buffer) {
 				insertIndex = len(buffer)
 			}
-			log.Printf("insertIndex: %v", insertIndex)
 			buffer = append(buffer[:insertIndex], append([]rune{ev.Ch}, buffer[insertIndex:]...)...)
+			updateLineStarts()
 			cursorX++
+			w, _ := termbox.Size()
+			log.Printf("CursorX: %d, w: %d", cursorX, w)
+			if cursorX > w-1 {
+				log.Printf("CursorX: %d, w: %d", cursorX, w)
+				viewOffsetX++
+				cursorX = w - 1
+			}
 		}
 	case ModeCommand:
 		if ev.Key == termbox.KeyEnter {
-			if string(commandBuffer) == "q" { // Quit command
+			command := string(commandBuffer)
+			if command == "q" { // Quit command
+				termbox.Close()
+				exit()
+			} else if command == "w" { // Save command
+				saveBufferToFile()
+			} else if command == "x" || command == "wq" { // Save and quit command
+				saveBufferToFile()
 				termbox.Close()
 				exit()
 			}
+			// TODO "q!"
+
 			mode = ModeNormal
 		} else if ev.Key == termbox.KeyEsc {
 			mode = ModeNormal
@@ -113,8 +138,24 @@ func handleKeyPress(ev termbox.Event) {
 			commandBuffer = append(commandBuffer, ev.Ch)
 		}
 	}
-	updateLineStarts()
 	render()
+}
+
+func loadFileIntoBuffer(filePath string) {
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return
+	}
+	buffer = []rune(string(content))
+	updateLineStarts()
+}
+
+func saveBufferToFile() {
+	content := string(buffer)
+	err := os.WriteFile(filePath, []byte(content), 0644)
+	if err != nil {
+		log.Printf("Error writing to file: %s", err)
+	}
 }
 
 func moveCursorUp() {
@@ -122,33 +163,68 @@ func moveCursorUp() {
 		return
 	}
 	cursorY--
-	length := lineLength(cursorY)
-	if cursorX >= length {
-		cursorX = length - 1
+	length := lineLength(cursorY + viewOffsetY)
+	if cursorX+viewOffsetX >= length && length > viewOffsetX {
+		cursorX = length - 1 - viewOffsetX
+	} else if length <= viewOffsetX {
+		viewOffsetX = length - 1
+		cursorX = 0
+	}
+	if viewOffsetY > 0 && cursorY < viewOffsetY {
+		viewOffsetY--
 	}
 }
 
-func moveCursorDown() {
-	if cursorY >= len(lineStarts)-2 {
+func moveCursorDown(startFromBegin bool) {
+	if cursorY+viewOffsetY >= len(lineStarts)-2 {
 		return
 	}
+	if startFromBegin {
+		cursorX = 0
+		viewOffsetX = 0
+	}
 	cursorY++
-	length := lineLength(cursorY)
-	log.Printf("length: %v", length)
-	if cursorX >= length {
-		cursorX = length - 1
+	_, h := termbox.Size()
+	if cursorY > h-2 {
+		viewOffsetY++
+		cursorY = h - 2
+	}
+	length := lineLength(cursorY + viewOffsetY)
+	if cursorX+viewOffsetX >= length && length > viewOffsetX {
+		cursorX = length - 1 - viewOffsetX
+	} else if length <= viewOffsetX {
+		viewOffsetX = length - 1
+		cursorX = 0
+	}
+}
+
+func moveCursorLeft() {
+	if cursorX > 0 {
+		cursorX--
+		return
+	}
+	if viewOffsetX > 0 {
+		viewOffsetX--
 	}
 }
 
 func moveCursorRight() {
-	if cursorX+1 < lineLength(cursorY) {
-		log.Printf("line: %v", lineLength(cursorY))
-		cursorX++
+	if cursorX+viewOffsetX+1 < lineLength(cursorY+viewOffsetY) {
+		width, _ := termbox.Size()
+		if cursorX+1 < width {
+			cursorX++
+			return
+		}
+		viewOffsetX++
 	}
 }
 
 func lineLength(line int) int {
 	if line > len(lineStarts)-2 {
+		return 0
+	}
+	// Situation where the buffer is empty
+	if len(buffer) == 1 {
 		return 0
 	}
 	// Check whether last character of the line is a newline
@@ -158,35 +234,24 @@ func lineLength(line int) int {
 	return lineStarts[line+1] - lineStarts[line]
 }
 
-func moveCursorLeft() {
-	if cursorX > 0 {
-		cursorX--
-	}
-}
-
 func render() {
 	termbox.Clear(termbox.ColorDefault, termbox.ColorDefault)
 	// Display buffer
 	// Track positions
 	x, y := 0, 0
 	w, h := termbox.Size() // Get terminal dimensions
-
-	// Display buffer with support for newlines
-	log.Printf("buffer: [%v]", buffer)
-	for _, ch := range buffer {
-		if ch == '\n' {
-			x = 0
+	h--                    // Subtract 1 for the status line
+	for i := 0; i < len(buffer); i++ {
+		if buffer[i] == '\n' {
 			y++
+			x = 0
 		} else {
-			termbox.SetCell(x, y, ch, termbox.ColorDefault, termbox.ColorDefault)
+			if y >= viewOffsetY && y < h+viewOffsetY && x >= viewOffsetX && x < w+viewOffsetX {
+				termbox.SetCell(x-viewOffsetX, y-viewOffsetY, buffer[i], termbox.ColorDefault, termbox.ColorDefault)
+			}
 			x++
 		}
-
-		if x >= w {
-			x = 0
-			y++
-		}
-		if y >= h {
+		if y >= h+viewOffsetY {
 			break // Stop rendering if we run out of space
 		}
 	}
@@ -195,19 +260,18 @@ func render() {
 	if mode == ModeCommand {
 		prompt := ":"
 		for i, ch := range prompt {
-			termbox.SetCell(i, h-1, ch, termbox.ColorDefault, termbox.ColorDefault) // Display at the bottom
+			termbox.SetCell(i, h, ch, termbox.ColorDefault, termbox.ColorDefault) // Display at the bottom
 		}
 		for i, ch := range commandBuffer {
-			termbox.SetCell(i+len(prompt), h-1, ch, termbox.ColorDefault, termbox.ColorDefault) // Display command after the prompt
+			termbox.SetCell(i+len(prompt), h, ch, termbox.ColorDefault, termbox.ColorDefault) // Display command after the prompt
 		}
 	} else if mode == ModeInsert {
 		// Display "-- INSERT --" at the bottom
 		insert := "-- INSERT --"
 		for i, ch := range insert {
-			termbox.SetCell(i, h-1, ch, termbox.ColorDefault, termbox.ColorDefault)
+			termbox.SetCell(i, h, ch, termbox.ColorDefault, termbox.ColorDefault)
 		}
 	}
-	log.Printf("Setting cursor at: %v, %v", cursorX, cursorY)
 	if cursorX < 0 {
 		cursorX = 0
 	}
@@ -220,16 +284,18 @@ func render() {
 
 func exit() {
 	running = false
-	// Exit the application
 	termbox.Close()
 }
 
-func main() {
+func StartEditor(path string) {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
+	filePath = path
 	err := termbox.Init()
 	if err != nil {
 		log.Fatal(err)
 	}
+	loadFileIntoBuffer(filePath)
+	render()
 	defer termbox.Close()
 
 	eventQueue := make(chan termbox.Event)
