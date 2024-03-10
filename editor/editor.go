@@ -87,7 +87,12 @@ func handleKeyPress(ev termbox.Event) {
 						cursorX = newlineIndexToRemove - lineStarts[cursorY+viewOffsetY]
 					}
 				} else if cursorX > 0 {
-					buffer = buffer[:len(buffer)-1]
+					// Calculate the insertion index
+					insertIndex := lineStarts[cursorY+viewOffsetY] + cursorX + viewOffsetX
+					if insertIndex > len(buffer) {
+						insertIndex = len(buffer)
+					}
+					buffer = append(buffer[:insertIndex-1], buffer[insertIndex:]...)
 					updateLineStarts()
 					moveCursorLeft()
 				}
