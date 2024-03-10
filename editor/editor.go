@@ -105,9 +105,7 @@ func handleKeyPress(ev termbox.Event) {
 			updateLineStarts()
 			cursorX++
 			w, _ := termbox.Size()
-			log.Printf("CursorX: %d, w: %d", cursorX, w)
 			if cursorX > w-1 {
-				log.Printf("CursorX: %d, w: %d", cursorX, w)
 				viewOffsetX++
 				cursorX = w - 1
 			}
@@ -196,6 +194,9 @@ func moveCursorDown(startFromBegin bool) {
 		viewOffsetX = length - 1
 		cursorX = 0
 	}
+	if viewOffsetX < 0 {
+		viewOffsetX = 0
+	}
 }
 
 func moveCursorLeft() {
@@ -247,6 +248,8 @@ func render() {
 			x = 0
 		} else {
 			if y >= viewOffsetY && y < h+viewOffsetY && x >= viewOffsetX && x < w+viewOffsetX {
+				log.Printf("x: %d, y: %d, i: %d", x, y, i)
+				log.Print("viewOffsetX: ", viewOffsetX, " viewOffsetY: ", viewOffsetY, " w: ", w, " h: ", h)
 				termbox.SetCell(x-viewOffsetX, y-viewOffsetY, buffer[i], termbox.ColorDefault, termbox.ColorDefault)
 			}
 			x++
