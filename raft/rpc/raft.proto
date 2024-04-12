@@ -1,0 +1,51 @@
+option go_package = "rpc/raftpb";
+
+service Raft {
+    rpc AppendEntries(AppendEntriesRequest) returns (AppendEntriesResponse);
+    rpc RequestVote(RequestVoteRequest) returns (RequestVoteResponse);
+    rpc InstallSnapshot(InstallSnapshotRequest) returns (InstallSnapshotResponse);
+}
+
+message InstallSnapshotRequest {
+    required int32 term = 1;
+    required int32 leaderId = 2;
+    required int32 lastIncludedIndex = 3;
+    required int32 lastIncludedTerm = 4;
+    required bytes data = 7;
+}
+
+message InstallSnapshotResponse {
+    required int32 term = 1;
+}
+
+message AppendEntriesRequest {
+    required int32 term = 1;
+    required int32 leaderId = 2;
+    required int32 prevLogIndex = 3;
+    required int32 prevLogTerm = 4;
+    required int32 leaderCommit = 5;
+    repeated Entry entries = 6;
+}
+
+message Entry {
+    required int32 term = 1;
+    required int32 index = 2;
+    required bytes command = 3;
+}
+
+message AppendEntriesResponse {
+    required int32 term = 1;
+    required bool success = 2;
+}
+
+message RequestVoteRequest {
+    required int32 term = 1;
+    required int32 candidateId = 2;
+    required int32 lastLogIndex = 3;
+    required int32 lastLogTerm = 4;
+}
+
+message RequestVoteResponse {
+    required int32 term = 1;
+    required bool voteGranted = 2;
+}
