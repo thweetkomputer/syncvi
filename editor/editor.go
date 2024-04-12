@@ -1,6 +1,9 @@
 package editor
 
 import (
+	"comp90020-assignment/raft"
+	raftpb "comp90020-assignment/raft/rpc"
+	"comp90020-assignment/storage"
 	"github.com/nsf/termbox-go"
 	"log"
 	"os"
@@ -295,8 +298,12 @@ func exit() {
 	termbox.Close()
 }
 
-func StartEditor(path string) {
+func StartEditor(path string, peers string, me int32, logPath string) {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
+	log.Printf("Starting editor with path: %s, peers: %s, me: %d", path, peers, me)
+	applyCh := make(chan raft.ApplyMsg)
+	persister := storage.BadgePersister{}
+	raft.Make(raftpb.ParseClientEnd(peers), me, &persister, applyCh)
 	filePath = path
 	err := termbox.Init()
 	if err != nil {
