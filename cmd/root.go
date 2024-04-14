@@ -16,17 +16,19 @@ var rootCmd = &cobra.Command{
 			return
 		}
 		if len(args) >= 1 {
-			editor.StartEditor(args[0], peers, me, dataDir)
+			editor.StartEditor(args[0], raftPeers, nodes, me, dataDir)
 		}
 	},
 }
 
 var me int32
-var peers string
+var raftPeers string
+var nodes string
 var dataDir string
 
 func init() {
-	rootCmd.Flags().StringVarP(&peers, "peers", "p", "localhost:33333", "Comma separated list of peers")
+	rootCmd.Flags().StringVarP(&raftPeers, "peers", "p", "localhost:22222", "Raft peers")
+	rootCmd.Flags().StringVarP(&nodes, "nodes", "n", "localhost:23333", "Nodes")
 	rootCmd.Flags().Int32VarP(&me, "me", "m", 0, "Index of the current node")
 	rootCmd.Flags().StringVarP(&dataDir, "data-dir", "d", ".syncvi", "Directory to store data")
 }

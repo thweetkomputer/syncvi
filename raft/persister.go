@@ -1,4 +1,4 @@
-package storage
+package raft
 
 type Persister interface {
 	// Save the data to the storage

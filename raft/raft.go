@@ -2,7 +2,6 @@ package raft
 
 import (
 	"comp90020-assignment/raft/rpc"
-	"comp90020-assignment/storage"
 	"context"
 	"fmt"
 	"google.golang.org/grpc"
@@ -24,11 +23,7 @@ type Raft struct {
 	mu    sync.Mutex          // Lock to protect shared access to this peer's state
 	peers []*raftpb.ClientEnd // RPC end points of all peers
 	me    int32               // this peer's index into peers[]
-	dead  int32               // set by Kill()
 
-	// Your data here (2A, 2B, 2C).
-	// Look at the paper's Figure 2 for a description of what
-	// state a Raft server must maintain.
 	currentTerm int32
 	votedFor    int32
 	log         []LogEntry
@@ -51,7 +46,7 @@ type Raft struct {
 
 	//rpcServer *RaftRpcServer
 	raftpb.UnimplementedRaftServer
-	persister storage.Persister
+	persister Persister
 }
 
 func (rf *Raft) mustEmbedUnimplementedRaftServer() {
@@ -75,23 +70,7 @@ type ApplyMsg struct {
 type LogEntry struct {
 	Index   int32
 	Term    int32
-	Command *EditCommand
-}
-
-type Command interface {
-	serialize() []byte
-	deserialize([]byte)
-}
-
-type EditCommand struct {
-}
-
-func (c *EditCommand) serialize() []byte {
-	return []byte{}
-}
-
-func (c *EditCommand) deserialize([]byte) {
-	return
+	Command []byte
 }
 
 func (rf *Raft) GetState() (int32, bool) {
@@ -172,7 +151,6 @@ func (rf *Raft) AppendEntries(ctx context.Context, args *raftpb.AppendEntriesReq
 		reply.Term = &rf.currentTerm
 		success := false
 		reply.Success = &success
-		log.Printf("%d[%d] reject", rf.me, rf.currentTerm)
 		return
 	}
 	if *args.PrevLogIndex >= rf.log[0].Index {
@@ -182,12 +160,10 @@ func (rf *Raft) AppendEntries(ctx context.Context, args *raftpb.AppendEntriesReq
 			if logIndex > rf.log[len(rf.log)-1].Index {
 				entries := make([]LogEntry, len(args.Entries[i:]))
 				for j := 0; j < len(entries); j++ {
-					command := &EditCommand{}
-					command.deserialize(args.Entries[i+j].Command)
 					entries[j] = LogEntry{
 						Index:   *args.Entries[i+j].Index,
 						Term:    *args.Entries[i+j].Term,
-						Command: command,
+						Command: args.Entries[i+j].Command,
 					}
 				}
 				rf.log = append(rf.log, entries...)
@@ -196,12 +172,10 @@ func (rf *Raft) AppendEntries(ctx context.Context, args *raftpb.AppendEntriesReq
 			if rf.log[logIndex-rf.log[0].Index].Term != *args.Entries[i].Term {
 				entries := make([]LogEntry, len(args.Entries[i:]))
 				for j := 0; j < len(entries); j++ {
-					command := &EditCommand{}
-					command.deserialize(args.Entries[i+j].Command)
 					entries[j] = LogEntry{
 						Index:   *args.Entries[i+j].Index,
 						Term:    *args.Entries[i+j].Term,
-						Command: command,
+						Command: args.Entries[i+j].Command,
 					}
 				}
 				rf.log = append(rf.log[:logIndex-rf.log[0].Index], entries...)
@@ -247,7 +221,7 @@ func (rf *Raft) InstallSnapshot(ctx context.Context, args *raftpb.InstallSnapsho
 	if *args.LastIncludedIndex < rf.log[len(rf.log)-1].Index {
 		rf.log = append([]LogEntry{rf.log[*args.LastIncludedIndex-rf.log[0].Index]}, rf.log[*args.LastIncludedIndex+1-rf.log[0].Index:]...)
 	} else {
-		rf.log = []LogEntry{{*args.LastIncludedIndex, *args.LastIncludedTerm, &EditCommand{}}}
+		rf.log = []LogEntry{{*args.LastIncludedIndex, *args.LastIncludedTerm, nil}}
 	}
 	log.Printf("%d[%d] install snapshot %d", rf.me, rf.currentTerm, args.LastIncludedIndex)
 	rf.snapshot = args.Data
@@ -269,11 +243,13 @@ func (rf *Raft) becomeFollower(hb bool) {
 }
 
 func (rf *Raft) becomeCandidate() {
+	if rf.state == CANDIDATE {
+		log.Printf("%d[%d] -> candidate %v", rf.me, rf.currentTerm, time.Now())
+	}
 	rf.state = CANDIDATE
 	rf.currentTerm++
 	rf.votedFor = rf.me
 	rf.electionTimer.Reset(time.Duration(rand.Intn(200)+300) * time.Millisecond)
-	log.Printf("%d[%d] -> candidate %v", rf.me, rf.currentTerm, time.Now())
 }
 
 func (rf *Raft) becomeLeader() {
@@ -295,25 +271,22 @@ func (rf *Raft) Start(command []byte) (int32, int32, bool) {
 	term := int32(-1)
 	isLeader := true
 
-	// Your code here (2B).
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	defer rf.persist()
 	term = rf.currentTerm
 	isLeader = rf.state == LEADER
 	if isLeader {
-		cmd := &EditCommand{}
-		cmd.deserialize(command)
 		log := LogEntry{
 			Index:   rf.log[len(rf.log)-1].Index + 1,
 			Term:    rf.currentTerm,
-			Command: cmd,
+			Command: command,
 		}
 		rf.log = append(rf.log, log)
 		index = log.Index
 		rf.heartbeatTimer.Reset(time.Duration(1) * time.Millisecond)
 	}
-
+	log.Printf("%d[%d] start %v %v %v", rf.me, rf.currentTerm, command, index, isLeader)
 	return index, term, isLeader
 }
 
@@ -345,7 +318,6 @@ func (rf *Raft) leaderCommit(term int32) {
 		if commitIndex > rf.commitIndex {
 			rf.commitIndex = commitIndex
 			rf.applyCond.Broadcast()
-			log.Printf("%d[%d] commit %d", rf.me, rf.currentTerm, rf.commitIndex)
 		}
 		rf.mu.Unlock()
 		time.Sleep(time.Duration(10) * time.Millisecond)
@@ -354,6 +326,12 @@ func (rf *Raft) leaderCommit(term int32) {
 
 func (rf *Raft) broadcast(term int32) {
 	var wg sync.WaitGroup
+	if len(rf.peers) == 1 {
+		lastLogIndex := rf.log[len(rf.log)-1].Index
+		if lastLogIndex > rf.commitIndex {
+			rf.commitCond.Broadcast()
+		}
+	}
 	wg.Add(len(rf.peers) - 1)
 	for i := int32(0); i < int32(len(rf.peers)); i++ {
 		if i == rf.me {
@@ -373,11 +351,10 @@ func (rf *Raft) broadcast(term int32) {
 				prefLogTerm := rf.log[prevLogIndex-rf.log[0].Index].Term
 				pbEntries := make([]*raftpb.Entry, len(entries))
 				for i := 0; i < len(entries); i++ {
-					command := entries[i].Command.serialize()
 					pbEntries[i] = &raftpb.Entry{
 						Index:   &entries[i].Index,
 						Term:    &entries[i].Term,
-						Command: command,
+						Command: entries[i].Command,
 					}
 				}
 				args := &raftpb.AppendEntriesRequest{
@@ -388,17 +365,17 @@ func (rf *Raft) broadcast(term int32) {
 					Entries:      pbEntries,
 					LeaderCommit: &rf.commitIndex,
 				}
-				if len(args.Entries) > 0 {
-					log.Printf("%d[%d] -> %d %v", rf.me, rf.currentTerm, server, args.Entries)
-				}
+				//if len(args.Entries) > 0 {
+				//	log.Printf("%d[%d] -> %d %v", rf.me, rf.currentTerm, server, args.Entries[0].Index)
+				//}
 				rf.mu.Unlock()
 				reply, err := rf.SendAppendEntries(server, args)
 				if err != nil {
 					return
 				}
 				rf.mu.Lock()
+				defer rf.mu.Unlock()
 				if term != rf.currentTerm {
-					rf.mu.Unlock()
 					return
 				}
 				if *reply.Term > rf.currentTerm {
@@ -416,7 +393,6 @@ func (rf *Raft) broadcast(term int32) {
 						rf.nextIndex[server] = 1
 					}
 				}
-				rf.mu.Unlock()
 			} else {
 				// TODO snapshot
 				args := &raftpb.InstallSnapshotRequest{
@@ -527,20 +503,13 @@ func (rf *Raft) ticker() {
 	}
 }
 
-//func newServer(rf *Raft) raftpb.RaftServer {
-//	return &RaftRpcServer{
-//		Raft: rf,
-//	}
-//}
-
 func Make(peers []*raftpb.ClientEnd, me int32,
-	persister storage.Persister, applyCh chan ApplyMsg) *Raft {
+	persister Persister, applyCh chan ApplyMsg) *Raft {
 	rf := &Raft{}
 	rf.peers = peers
 	rf.persister = persister
 	rf.me = me
 
-	// Your initialization code here (2A, 2B, 2C).
 	rf.commitIndex = 0
 	rf.lastApplied = 0
 	rf.log = make([]LogEntry, 1)
@@ -614,7 +583,6 @@ func Make(peers []*raftpb.ClientEnd, me int32,
 				rf.mu.Unlock()
 			}
 			rf.mu.Lock()
-			log.Printf("%d[%d] applied %v", rf.me, rf.currentTerm, rf.lastApplied)
 			rf.mu.Unlock()
 		}
 	}()

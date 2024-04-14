@@ -1,9 +1,9 @@
 package editor
 
 import (
-	"comp90020-assignment/raft"
 	raftpb "comp90020-assignment/raft/rpc"
 	"comp90020-assignment/storage"
+	"context"
 	"github.com/nsf/termbox-go"
 	"log"
 	"os"
@@ -37,12 +37,13 @@ func updateLineStarts() {
 	lineStarts = append(lineStarts, len(buffer)) // Add the end of the buffer as the last line start
 }
 
-func handleKeyPress(ev termbox.Event) {
+func tryHandleKeyPress(ev termbox.Event) bool {
+	defer render()
 	switch mode {
 	case ModeNormal:
-		if ev.Ch == ':' { // Enter command mode
+		if ev.Ch == ':' {
 			mode = ModeCommand
-			commandBuffer = []rune{} // Reset command buffer
+			commandBuffer = []rune{}
 		} else if ev.Ch == 'i' {
 			mode = ModeInsert
 		} else if ev.Ch == 'a' {
@@ -59,21 +60,65 @@ func handleKeyPress(ev termbox.Event) {
 		} else if ev.Ch == 'l' {
 			moveCursorRight()
 		}
-		// TODO: Add more keys here
+		return true
 	case ModeInsert:
 		if ev.Key == termbox.KeyEsc {
 			mode = ModeNormal
 			moveCursorLeft()
-		} else if ev.Key == termbox.KeySpace {
-			buffer = append(buffer, ' ')
-			updateLineStarts()
-			cursorX++
-		} else if ev.Key == termbox.KeyEnter {
+			return true
+		}
+		return false
+	case ModeCommand:
+		if ev.Key == termbox.KeyEnter {
+			command := string(commandBuffer)
+			if command == "q" {
+				termbox.Close()
+				exit()
+			} else if command == "w" {
+				saveBufferToFile()
+			} else if command == "x" || command == "wq" {
+				saveBufferToFile()
+				termbox.Close()
+				exit()
+			}
+			mode = ModeNormal
+			return true
+		}
+		if ev.Key == termbox.KeyEsc {
+			mode = ModeNormal
+			return true
+		}
+		if ev.Key == termbox.KeyBackspace || ev.Key == termbox.KeyBackspace2 {
+			if len(commandBuffer) > 0 {
+				commandBuffer = commandBuffer[:len(commandBuffer)-1]
+			}
+			return true
+		}
+		if ev.Ch != 0 {
+			commandBuffer = append(commandBuffer, ev.Ch)
+		}
+		return true
+	}
+	return false
+}
+
+func handleKeyPress(ev termbox.Event) {
+	defer render()
+	ctx := context.Background()
+	switch mode {
+	case ModeInsert:
+		var newBuffer []rune
+		if ev.Key == termbox.KeyEsc {
+			mode = ModeNormal
+			moveCursorLeft()
+			return
+		}
+		if ev.Key == termbox.KeyEnter {
 			insertIndex := lineStarts[cursorY+viewOffsetY] + cursorX + viewOffsetX
 			if insertIndex > len(buffer) {
 				insertIndex = len(buffer)
 			}
-			buffer = append(buffer[:insertIndex], append([]rune{'\n'}, buffer[insertIndex:]...)...)
+			newBuffer = append(buffer[:insertIndex], append([]rune{'\n'}, buffer[insertIndex:]...)...)
 			updateLineStarts()
 			moveCursorDown(true)
 		} else if ev.Key == termbox.KeyBackspace || ev.Key == termbox.KeyBackspace2 {
@@ -82,7 +127,7 @@ func handleKeyPress(ev termbox.Event) {
 					newlineIndexToRemove := lineStarts[cursorY+viewOffsetY] - 1
 					if newlineIndexToRemove >= 0 && newlineIndexToRemove < len(buffer) {
 						// Remove the newline character from the buffer
-						buffer = append(buffer[:newlineIndexToRemove], buffer[newlineIndexToRemove+1:]...)
+						newBuffer = append(buffer[:newlineIndexToRemove], buffer[newlineIndexToRemove+1:]...)
 						updateLineStarts()
 
 						// Update cursor position
@@ -95,10 +140,27 @@ func handleKeyPress(ev termbox.Event) {
 					if insertIndex > len(buffer) {
 						insertIndex = len(buffer)
 					}
-					buffer = append(buffer[:insertIndex-1], buffer[insertIndex:]...)
+					newBuffer = append(buffer[:insertIndex-1], buffer[insertIndex:]...)
 					updateLineStarts()
 					moveCursorLeft()
 				}
+			}
+		} else if ev.Key == termbox.KeySpace {
+			// Calculate the insertion index
+			insertIndex := 0
+			if len(lineStarts) > 0 {
+				insertIndex = lineStarts[cursorY+viewOffsetY] + cursorX + viewOffsetX
+			}
+			if insertIndex > len(buffer) {
+				insertIndex = len(buffer)
+			}
+			newBuffer = append(buffer[:insertIndex], append([]rune{' '}, buffer[insertIndex:]...)...)
+			updateLineStarts()
+			cursorX++
+			w, _ := termbox.Size()
+			if cursorX > w-1 {
+				viewOffsetX++
+				cursorX = w - 1
 			}
 		} else if ev.Ch != 0 {
 			// Calculate the insertion index
@@ -109,7 +171,9 @@ func handleKeyPress(ev termbox.Event) {
 			if insertIndex > len(buffer) {
 				insertIndex = len(buffer)
 			}
-			buffer = append(buffer[:insertIndex], append([]rune{ev.Ch}, buffer[insertIndex:]...)...)
+			newBuffer = append([]rune(nil), buffer[:insertIndex]...)
+			newBuffer = append(newBuffer, ev.Ch)
+			newBuffer = append(newBuffer, buffer[insertIndex:]...)
 			updateLineStarts()
 			cursorX++
 			w, _ := termbox.Size()
@@ -118,31 +182,11 @@ func handleKeyPress(ev termbox.Event) {
 				cursorX = w - 1
 			}
 		}
-	case ModeCommand:
-		if ev.Key == termbox.KeyEnter {
-			command := string(commandBuffer)
-			if command == "q" { // Quit command
-				termbox.Close()
-				exit()
-			} else if command == "w" { // Save command
-				saveBufferToFile()
-			} else if command == "x" || command == "wq" { // Save and quit command
-				saveBufferToFile()
-				termbox.Close()
-				exit()
-			}
-			// TODO "q!"
+		log.Printf("before diff: %v", string(buffer))
+		diff := diff(buffer, newBuffer)
+		log.Printf("Diff: %v", diff)
 
-			mode = ModeNormal
-		} else if ev.Key == termbox.KeyEsc {
-			mode = ModeNormal
-		} else if ev.Key == termbox.KeyBackspace || ev.Key == termbox.KeyBackspace2 {
-			if len(commandBuffer) > 0 {
-				commandBuffer = commandBuffer[:len(commandBuffer)-1]
-			}
-		} else if ev.Ch != 0 {
-			commandBuffer = append(commandBuffer, ev.Ch)
-		}
+		client.Do(ctx, diff)
 	}
 	render()
 }
@@ -295,15 +339,19 @@ func render() {
 
 func exit() {
 	running = false
+	os.Exit(0)
 	termbox.Close()
 }
 
-func StartEditor(path string, peers string, me int32, logPath string) {
+var server *Server
+var client *Client
+
+func StartEditor(path string, raftPeers string, nodes string, me int32, logPath string) {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	log.Printf("Starting editor with path: %s, peers: %s, me: %d", path, peers, me)
-	applyCh := make(chan raft.ApplyMsg)
+	msgCh := make(chan []byte)
 	persister := storage.BadgePersister{}
-	raft.Make(raftpb.ParseClientEnd(peers), me, &persister, applyCh)
+	server = StartServer(raftpb.ParseClientEnd(raftPeers), ParseClientEnd(nodes), me, &persister, msgCh)
+	client = MakeClient(ParseClientEnd(nodes), me)
 	filePath = path
 	err := termbox.Init()
 	if err != nil {
@@ -316,14 +364,24 @@ func StartEditor(path string, peers string, me int32, logPath string) {
 	eventQueue := make(chan termbox.Event)
 	go func() {
 		for {
-			eventQueue <- termbox.PollEvent()
+			if event := termbox.PollEvent(); !tryHandleKeyPress(event) {
+				eventQueue <- event
+			}
 		}
 	}()
 
 	for running {
-		switch ev := <-eventQueue; ev.Type {
-		case termbox.EventKey:
+		select {
+		case ev := <-eventQueue:
+			log.Printf("buffer: %v", string(buffer))
 			handleKeyPress(ev)
+		case diff := <-msgCh:
+			log.Printf("Received diff: %v", diff)
+			log.Printf("old buffer: %v", string(buffer))
+			buffer = patch(buffer, diff)
+			log.Printf("new buffer: %v", string(buffer))
+			updateLineStarts()
+			render()
 		}
 	}
 }
