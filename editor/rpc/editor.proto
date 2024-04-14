@@ -1,0 +1,15 @@
+option go_package = "rpc/editorpb";
+
+service Editor {
+  rpc Do(DoRequest) returns (DoResponse) {}
+}
+
+message DoRequest {
+  required bytes diff = 1;
+  required int32 ckID = 2;
+  required int64 seq = 3;
+}
+
+message DoResponse {
+  required string err = 1;
+}
