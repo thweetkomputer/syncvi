@@ -7,6 +7,7 @@ import (
 	"github.com/nsf/termbox-go"
 	"log"
 	"os"
+	"strconv"
 )
 
 const (
@@ -35,6 +36,9 @@ func updateLineStarts() {
 		}
 	}
 	lineStarts = append(lineStarts, len(buffer)) // Add the end of the buffer as the last line start
+	if cursorX+viewOffsetX > lineLength(cursorY+viewOffsetY) {
+		cursorX = lineLength(cursorY + viewOffsetY)
+	}
 }
 
 func tryHandleKeyPress(ev termbox.Event) bool {
@@ -118,7 +122,9 @@ func handleKeyPress(ev termbox.Event) {
 			if insertIndex > len(buffer) {
 				insertIndex = len(buffer)
 			}
-			newBuffer = append(buffer[:insertIndex], append([]rune{'\n'}, buffer[insertIndex:]...)...)
+			newBuffer = append([]rune(nil), buffer[:insertIndex]...)
+			newBuffer = append(newBuffer, '\n')
+			newBuffer = append(newBuffer, buffer[insertIndex:]...)
 			updateLineStarts()
 			moveCursorDown(true)
 		} else if ev.Key == termbox.KeyBackspace || ev.Key == termbox.KeyBackspace2 {
@@ -140,7 +146,8 @@ func handleKeyPress(ev termbox.Event) {
 					if insertIndex > len(buffer) {
 						insertIndex = len(buffer)
 					}
-					newBuffer = append(buffer[:insertIndex-1], buffer[insertIndex:]...)
+					newBuffer = append([]rune(nil), buffer[:insertIndex-1]...)
+					newBuffer = append(newBuffer, buffer[insertIndex:]...)
 					updateLineStarts()
 					moveCursorLeft()
 				}
@@ -154,7 +161,9 @@ func handleKeyPress(ev termbox.Event) {
 			if insertIndex > len(buffer) {
 				insertIndex = len(buffer)
 			}
-			newBuffer = append(buffer[:insertIndex], append([]rune{' '}, buffer[insertIndex:]...)...)
+			newBuffer = append([]rune(nil), buffer[:insertIndex]...)
+			newBuffer = append(newBuffer, ' ')
+			newBuffer = append(newBuffer, buffer[insertIndex:]...)
 			updateLineStarts()
 			cursorX++
 			w, _ := termbox.Size()
@@ -182,9 +191,7 @@ func handleKeyPress(ev termbox.Event) {
 				cursorX = w - 1
 			}
 		}
-		log.Printf("before diff: %v", string(buffer))
 		diff := diff(buffer, newBuffer)
-		log.Printf("Diff: %v", diff)
 
 		client.Do(ctx, diff)
 	}
@@ -277,7 +284,7 @@ func lineLength(line int) int {
 		return 0
 	}
 	// Situation where the buffer is empty
-	if len(buffer) == 1 {
+	if len(buffer) == 0 {
 		return 0
 	}
 	// Check whether last character of the line is a newline
@@ -300,8 +307,6 @@ func render() {
 			x = 0
 		} else {
 			if y >= viewOffsetY && y < h+viewOffsetY && x >= viewOffsetX && x < w+viewOffsetX {
-				log.Printf("x: %d, y: %d, i: %d", x, y, i)
-				log.Print("viewOffsetX: ", viewOffsetX, " viewOffsetY: ", viewOffsetY, " w: ", w, " h: ", h)
 				termbox.SetCell(x-viewOffsetX, y-viewOffsetY, buffer[i], termbox.ColorDefault, termbox.ColorDefault)
 			}
 			x++
@@ -347,10 +352,9 @@ var server *Server
 var client *Client
 
 func StartEditor(path string, raftPeers string, nodes string, me int32, logPath string) {
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	msgCh := make(chan []byte)
-	persister := storage.BadgePersister{}
-	server = StartServer(raftpb.ParseClientEnd(raftPeers), ParseClientEnd(nodes), me, &persister, msgCh)
+	msgCh := make(chan interface{}, 1024)
+	persister := storage.MakeGoBPersister(logPath + "/" + strconv.Itoa(int(me)))
+	server = StartServer(raftpb.ParseClientEnd(raftPeers), ParseClientEnd(nodes), me, persister, msgCh)
 	client = MakeClient(ParseClientEnd(nodes), me)
 	filePath = path
 	err := termbox.Init()
@@ -373,13 +377,9 @@ func StartEditor(path string, raftPeers string, nodes string, me int32, logPath 
 	for running {
 		select {
 		case ev := <-eventQueue:
-			log.Printf("buffer: %v", string(buffer))
 			handleKeyPress(ev)
-		case diff := <-msgCh:
-			log.Printf("Received diff: %v", diff)
-			log.Printf("old buffer: %v", string(buffer))
-			buffer = patch(buffer, diff)
-			log.Printf("new buffer: %v", string(buffer))
+		case <-msgCh:
+			buffer = server.data
 			updateLineStarts()
 			render()
 		}
