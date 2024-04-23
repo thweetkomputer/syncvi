@@ -21,6 +21,9 @@ const (
 	CANDIDATE
 )
 
+const BASIC_TIMEOUT = 1000
+const BASIC_INTERVAL = 100
+
 type Raft struct {
 	mu    sync.Mutex          // Lock to protect shared access to this peer's state
 	peers []*raftpb.ClientEnd // RPC end points of all peers
@@ -53,7 +56,7 @@ type Raft struct {
 
 type ApplyMsg struct {
 	CommandValid bool
-	Command      interface{}
+	Command      []byte
 	CommandIndex int32
 	CommandTerm  int32
 
@@ -141,8 +144,8 @@ func (rf *Raft) RequestVote(ctx context.Context, args *raftpb.RequestVoteRequest
 		reply.Term = &rf.currentTerm
 		voteGranted := true
 		reply.VoteGranted = &voteGranted
-		rf.electionTimer.Reset(time.Duration(rand.Intn(200)+300) * time.Millisecond)
-		log.Printf("%d[%d] voted for %d", rf.me, rf.currentTerm, args.CandidateId)
+		rf.electionTimer.Reset(time.Duration(rand.Intn(BASIC_TIMEOUT)+BASIC_TIMEOUT) * time.Millisecond)
+		log.Printf("%d[%d] voted for %d", rf.me, rf.currentTerm, *args.CandidateId)
 		return
 	}
 	reply.Term = &rf.currentTerm
@@ -171,7 +174,7 @@ func (rf *Raft) AppendEntries(ctx context.Context, args *raftpb.AppendEntriesReq
 		rf.currentTerm = *args.Term
 		rf.becomeFollower(false)
 	}
-	rf.electionTimer.Reset(time.Duration(rand.Intn(200)+300) * time.Millisecond)
+	rf.electionTimer.Reset(time.Duration(rand.Intn(BASIC_TIMEOUT)+BASIC_TIMEOUT) * time.Millisecond)
 	if *args.PrevLogIndex > rf.log[len(rf.log)-1].Index ||
 		*args.PrevLogIndex >= rf.log[0].Index &&
 			*args.PrevLogTerm != rf.log[*args.PrevLogIndex-rf.log[0].Index].Term {
@@ -240,7 +243,7 @@ func (rf *Raft) InstallSnapshot(ctx context.Context, args *raftpb.InstallSnapsho
 		rf.currentTerm = *args.Term
 		rf.becomeFollower(false)
 	}
-	rf.electionTimer.Reset(time.Duration(rand.Intn(200)+300) * time.Millisecond)
+	rf.electionTimer.Reset(time.Duration(rand.Intn(BASIC_TIMEOUT)+BASIC_TIMEOUT) * time.Millisecond)
 	if *args.LastIncludedIndex <= rf.log[0].Index {
 		return
 	}
@@ -264,7 +267,7 @@ func (rf *Raft) becomeFollower(hb bool) {
 	rf.heartbeatTimer.Stop()
 	rf.votedFor = -1
 	if hb {
-		rf.electionTimer.Reset(time.Duration(rand.Intn(200)+300) * time.Millisecond)
+		rf.electionTimer.Reset(time.Duration(rand.Intn(BASIC_TIMEOUT)+BASIC_TIMEOUT) * time.Millisecond)
 	}
 }
 
@@ -275,7 +278,7 @@ func (rf *Raft) becomeCandidate() {
 	rf.state = CANDIDATE
 	rf.currentTerm++
 	rf.votedFor = rf.me
-	rf.electionTimer.Reset(time.Duration(rand.Intn(200)+300) * time.Millisecond)
+	rf.electionTimer.Reset(time.Duration(rand.Intn(BASIC_TIMEOUT)+BASIC_TIMEOUT) * time.Millisecond)
 }
 
 func (rf *Raft) becomeLeader() {
@@ -289,6 +292,7 @@ func (rf *Raft) becomeLeader() {
 	}
 	go rf.leaderCommit(rf.currentTerm)
 	rf.heartbeatTimer.Reset(time.Duration(1) * time.Millisecond)
+	rf.log = append(rf.log, LogEntry{Index: rf.log[len(rf.log)-1].Index + 1, Term: rf.currentTerm, Command: []byte{}})
 	log.Printf("%d[%d] -> leader %v", rf.me, rf.currentTerm, time.Now())
 }
 
@@ -393,6 +397,7 @@ func (rf *Raft) broadcast(term int32) {
 				rf.mu.Unlock()
 				reply, err := rf.SendAppendEntries(server, args)
 				if err != nil {
+					log.Printf("%d[%d] SendAppendEntries %d error %v", rf.me, rf.currentTerm, server, err)
 					return
 				}
 				rf.mu.Lock()
@@ -513,7 +518,7 @@ func (rf *Raft) ticker() {
 		case <-rf.heartbeatTimer.C:
 			rf.mu.Lock()
 			if rf.state == LEADER {
-				rf.heartbeatTimer.Reset(time.Duration(100) * time.Millisecond)
+				rf.heartbeatTimer.Reset(time.Duration(BASIC_INTERVAL) * time.Millisecond)
 				go rf.broadcast(rf.currentTerm)
 			} else {
 				rf.heartbeatTimer.Stop()
@@ -565,6 +570,7 @@ func Make(peers []*raftpb.ClientEnd, me int32,
 	go func() {
 		for {
 			rf.mu.Lock()
+			log.Printf("%d[%d] lastApplied %d commitIndex %d", rf.me, rf.currentTerm, rf.lastApplied, rf.commitIndex)
 			for rf.commitIndex <= rf.lastApplied {
 				rf.applyCond.Wait()
 			}
@@ -582,6 +588,7 @@ func Make(peers []*raftpb.ClientEnd, me int32,
 				rf.mu.Unlock()
 				for i := 0; i < len(applyMsgs); i++ {
 					applyCh <- applyMsgs[i]
+					log.Printf("%d[%d] apply %d %v", rf.me, rf.currentTerm, applyMsgs[i].CommandIndex, applyMsgs[i].Command)
 					rf.mu.Lock()
 					rf.lastApplied++
 					rf.mu.Unlock()

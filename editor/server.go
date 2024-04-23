@@ -70,19 +70,21 @@ func (s *Server) processOp() {
 	for {
 		msg := <-s.applyCh
 		if msg.CommandValid {
-			var op Op
-			op = deserializeOp(msg.Command.([]byte))
 			s.mu.Lock()
-			if s.ops[op.CkId] >= op.Seq {
-				s.commitCond.Broadcast()
-				s.mu.Unlock()
-				continue
+			var op Op
+			if len(msg.Command) > 0 {
+				op = deserializeOp(msg.Command)
+				if s.ops[op.CkId] >= op.Seq {
+					s.commitCond.Broadcast()
+					s.mu.Unlock()
+					continue
+				}
 			}
 			dif := op.Diff
 			if len(dif) > 0 {
 				s.data = patch(s.data, dif)
-				s.msgCh <- struct{}{}
 			}
+			s.msgCh <- struct{}{}
 			s.logTerm[msg.CommandIndex] = msg.CommandTerm
 			s.commitIndex = msg.CommandIndex
 			s.ops[op.CkId] = op.Seq
@@ -90,6 +92,7 @@ func (s *Server) processOp() {
 				w := new(bytes.Buffer)
 				e := gob.NewEncoder(w)
 				e.Encode(s.data)
+				e.Encode(s.ops)
 				s.rf.Snapshot(s.commitIndex, w.Bytes())
 			}
 			s.commitCond.Broadcast()
@@ -156,6 +159,19 @@ func StartServer(peers []*raftpb.ClientEnd, nodes []*ClientEnd, me int32,
 		logTerm:      make(map[int32]int32),
 		persister:    persister,
 		commitIndex:  0,
+	}
+	snapshot := s.persister.ReadSnapshot()
+	if snapshot != nil && len(snapshot) > 0 {
+		r := bytes.NewBuffer(snapshot)
+		d := gob.NewDecoder(r)
+		var data []rune
+		var ops map[int32]int64
+		if d.Decode(&data) != nil || d.Decode(&ops) != nil {
+			log.Fatal("decode error")
+		} else {
+			s.data = data
+			s.ops = ops
+		}
 	}
 	s.mu = sync.Mutex{}
 	s.commitCond = sync.NewCond(&s.mu)

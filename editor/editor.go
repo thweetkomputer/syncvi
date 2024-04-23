@@ -225,6 +225,9 @@ func moveCursorUp() {
 		cursorX = length - 1 - viewOffsetX
 	} else if length <= viewOffsetX {
 		viewOffsetX = length - 1
+		if viewOffsetX < 0 {
+			viewOffsetX = 0
+		}
 		cursorX = 0
 	}
 	if viewOffsetY > 0 && cursorY < viewOffsetY {
@@ -355,7 +358,7 @@ func StartEditor(path string, raftPeers string, nodes string, me int32, logPath 
 	msgCh := make(chan interface{}, 1024)
 	persister := storage.MakeGoBPersister(logPath + "/" + strconv.Itoa(int(me)))
 	server = StartServer(raftpb.ParseClientEnd(raftPeers), ParseClientEnd(nodes), me, persister, msgCh)
-	client = MakeClient(ParseClientEnd(nodes), me)
+	client = MakeClient(ParseClientEnd(nodes), me, server.ops[me])
 	filePath = path
 	err := termbox.Init()
 	if err != nil {
