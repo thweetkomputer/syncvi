@@ -198,15 +198,6 @@ func handleKeyPress(ev termbox.Event) {
 	render()
 }
 
-func loadFileIntoBuffer(filePath string) {
-	content, err := os.ReadFile(filePath)
-	if err != nil {
-		return
-	}
-	buffer = []rune(string(content))
-	updateLineStarts()
-}
-
 func saveBufferToFile() {
 	content := string(buffer)
 	err := os.WriteFile(filePath, []byte(content), 0644)
@@ -364,7 +355,6 @@ func StartEditor(path string, raftPeers string, nodes string, me int32, logPath 
 	if err != nil {
 		log.Fatal(err)
 	}
-	loadFileIntoBuffer(filePath)
 	render()
 	defer termbox.Close()
 
