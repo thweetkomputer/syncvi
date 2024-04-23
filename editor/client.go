@@ -5,7 +5,6 @@ import (
 	"context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	"log"
 	"strings"
 	"time"
 )
@@ -23,11 +22,11 @@ type ClientEnd struct {
 	Client editorpb.EditorClient
 }
 
-func MakeClient(servers []*ClientEnd, me int32) *Client {
+func MakeClient(servers []*ClientEnd, me int32, seq int64) *Client {
 	ck := new(Client)
 	ck.servers = servers
 	ck.id = me
-	ck.requestSeq = 0
+	ck.requestSeq = seq + 1
 	return ck
 }
 
@@ -38,7 +37,6 @@ func (ck *Client) Do(ctx context.Context, diff []byte) {
 		CkID: &ck.id,
 		Seq:  &ck.requestSeq,
 	}
-	log.Printf("client[%d] Do %v to server[%d]", ck.id, args.Diff, ck.leader)
 	for {
 		resCh := make(chan interface{})
 		leader := ck.leader
@@ -60,7 +58,6 @@ func (ck *Client) Do(ctx context.Context, diff []byte) {
 			}
 		case <-time.After(1000 * time.Millisecond):
 		}
-		log.Printf("client[%d] Do %v to server[%d] timeout", ck.id, args.Diff, leader)
 		ck.leader = (ck.leader + 1) % int32(len(ck.servers))
 	}
 }

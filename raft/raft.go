@@ -1,8 +1,10 @@
 package raft
 
 import (
+	"bytes"
 	"comp90020-assignment/raft/rpc"
 	"context"
+	"encoding/gob"
 	"fmt"
 	"google.golang.org/grpc"
 	"log"
@@ -18,6 +20,9 @@ const (
 	FOLLOWER
 	CANDIDATE
 )
+
+const BASIC_TIMEOUT = 1000
+const BASIC_INTERVAL = 100
 
 type Raft struct {
 	mu    sync.Mutex          // Lock to protect shared access to this peer's state
@@ -49,14 +54,9 @@ type Raft struct {
 	persister Persister
 }
 
-func (rf *Raft) mustEmbedUnimplementedRaftServer() {
-	//TODO implement me
-	panic("implement me")
-}
-
 type ApplyMsg struct {
 	CommandValid bool
-	Command      interface{}
+	Command      []byte
 	CommandIndex int32
 	CommandTerm  int32
 
@@ -80,15 +80,45 @@ func (rf *Raft) GetState() (int32, bool) {
 }
 
 func (rf *Raft) persist() {
-	// TODO: Implement this
+	w := new(bytes.Buffer)
+	e := gob.NewEncoder(w)
+	e.Encode(rf.currentTerm)
+	e.Encode(rf.votedFor)
+	e.Encode(rf.log)
+	raftstate := w.Bytes()
+	rf.persister.Save(raftstate, rf.snapshot)
 }
 
 func (rf *Raft) readPersist(data []byte) {
-	// TODO: Implement this
+	if data == nil || len(data) < 1 { // bootstrap without any state?
+		return
+	}
+	r := bytes.NewBuffer(data)
+	d := gob.NewDecoder(r)
+	var currentTerm int32
+	var votedFor int32
+	var logs []LogEntry
+	if d.Decode(&currentTerm) != nil ||
+		d.Decode(&votedFor) != nil ||
+		d.Decode(&logs) != nil {
+		log.Fatalf("readPersist error")
+	} else {
+		rf.currentTerm = currentTerm
+		rf.votedFor = votedFor
+		rf.log = logs
+	}
 }
 
-func (rf *Raft) readSnapshot(index int, snapshot []byte) {
-	// TODO: Implement this
+func (rf *Raft) Snapshot(index int32, snapshot []byte) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	log.Printf("%d[%d] snapshot %d", rf.me, rf.currentTerm, index)
+	if index <= rf.log[0].Index || index > rf.log[len(rf.log)-1].Index {
+		return
+	}
+	rf.log = append([]LogEntry{rf.log[index-rf.log[0].Index]}, rf.log[index+1-rf.log[0].Index:]...)
+	rf.snapshot = snapshot
+	rf.persist()
 }
 
 func (rf *Raft) RequestVote(ctx context.Context, args *raftpb.RequestVoteRequest) (reply *raftpb.RequestVoteResponse, err error) {
@@ -114,8 +144,8 @@ func (rf *Raft) RequestVote(ctx context.Context, args *raftpb.RequestVoteRequest
 		reply.Term = &rf.currentTerm
 		voteGranted := true
 		reply.VoteGranted = &voteGranted
-		rf.electionTimer.Reset(time.Duration(rand.Intn(200)+300) * time.Millisecond)
-		log.Printf("%d[%d] voted for %d", rf.me, rf.currentTerm, args.CandidateId)
+		rf.electionTimer.Reset(time.Duration(rand.Intn(BASIC_TIMEOUT)+BASIC_TIMEOUT) * time.Millisecond)
+		log.Printf("%d[%d] voted for %d", rf.me, rf.currentTerm, *args.CandidateId)
 		return
 	}
 	reply.Term = &rf.currentTerm
@@ -144,7 +174,7 @@ func (rf *Raft) AppendEntries(ctx context.Context, args *raftpb.AppendEntriesReq
 		rf.currentTerm = *args.Term
 		rf.becomeFollower(false)
 	}
-	rf.electionTimer.Reset(time.Duration(rand.Intn(200)+300) * time.Millisecond)
+	rf.electionTimer.Reset(time.Duration(rand.Intn(BASIC_TIMEOUT)+BASIC_TIMEOUT) * time.Millisecond)
 	if *args.PrevLogIndex > rf.log[len(rf.log)-1].Index ||
 		*args.PrevLogIndex >= rf.log[0].Index &&
 			*args.PrevLogTerm != rf.log[*args.PrevLogIndex-rf.log[0].Index].Term {
@@ -156,7 +186,6 @@ func (rf *Raft) AppendEntries(ctx context.Context, args *raftpb.AppendEntriesReq
 	if *args.PrevLogIndex >= rf.log[0].Index {
 		for i := 0; i < len(args.Entries); i++ {
 			logIndex := *args.Entries[i].Index
-			// TODO maybe error
 			if logIndex > rf.log[len(rf.log)-1].Index {
 				entries := make([]LogEntry, len(args.Entries[i:]))
 				for j := 0; j < len(entries); j++ {
@@ -214,7 +243,7 @@ func (rf *Raft) InstallSnapshot(ctx context.Context, args *raftpb.InstallSnapsho
 		rf.currentTerm = *args.Term
 		rf.becomeFollower(false)
 	}
-	rf.electionTimer.Reset(time.Duration(rand.Intn(200)+300) * time.Millisecond)
+	rf.electionTimer.Reset(time.Duration(rand.Intn(BASIC_TIMEOUT)+BASIC_TIMEOUT) * time.Millisecond)
 	if *args.LastIncludedIndex <= rf.log[0].Index {
 		return
 	}
@@ -238,7 +267,7 @@ func (rf *Raft) becomeFollower(hb bool) {
 	rf.heartbeatTimer.Stop()
 	rf.votedFor = -1
 	if hb {
-		rf.electionTimer.Reset(time.Duration(rand.Intn(200)+300) * time.Millisecond)
+		rf.electionTimer.Reset(time.Duration(rand.Intn(BASIC_TIMEOUT)+BASIC_TIMEOUT) * time.Millisecond)
 	}
 }
 
@@ -249,7 +278,7 @@ func (rf *Raft) becomeCandidate() {
 	rf.state = CANDIDATE
 	rf.currentTerm++
 	rf.votedFor = rf.me
-	rf.electionTimer.Reset(time.Duration(rand.Intn(200)+300) * time.Millisecond)
+	rf.electionTimer.Reset(time.Duration(rand.Intn(BASIC_TIMEOUT)+BASIC_TIMEOUT) * time.Millisecond)
 }
 
 func (rf *Raft) becomeLeader() {
@@ -263,6 +292,7 @@ func (rf *Raft) becomeLeader() {
 	}
 	go rf.leaderCommit(rf.currentTerm)
 	rf.heartbeatTimer.Reset(time.Duration(1) * time.Millisecond)
+	rf.log = append(rf.log, LogEntry{Index: rf.log[len(rf.log)-1].Index + 1, Term: rf.currentTerm, Command: []byte{}})
 	log.Printf("%d[%d] -> leader %v", rf.me, rf.currentTerm, time.Now())
 }
 
@@ -286,7 +316,6 @@ func (rf *Raft) Start(command []byte) (int32, int32, bool) {
 		index = log.Index
 		rf.heartbeatTimer.Reset(time.Duration(1) * time.Millisecond)
 	}
-	log.Printf("%d[%d] start %v %v %v", rf.me, rf.currentTerm, command, index, isLeader)
 	return index, term, isLeader
 }
 
@@ -365,9 +394,6 @@ func (rf *Raft) broadcast(term int32) {
 					Entries:      pbEntries,
 					LeaderCommit: &rf.commitIndex,
 				}
-				//if len(args.Entries) > 0 {
-				//	log.Printf("%d[%d] -> %d %v", rf.me, rf.currentTerm, server, args.Entries[0].Index)
-				//}
 				rf.mu.Unlock()
 				reply, err := rf.SendAppendEntries(server, args)
 				if err != nil {
@@ -394,7 +420,6 @@ func (rf *Raft) broadcast(term int32) {
 					}
 				}
 			} else {
-				// TODO snapshot
 				args := &raftpb.InstallSnapshotRequest{
 					Term:              &term,
 					LeaderId:          &rf.me,
@@ -428,7 +453,6 @@ func (rf *Raft) broadcast(term int32) {
 			}
 		}(i)
 	}
-	// TODO wg.Wait() maybe become follower again
 }
 
 func (rf *Raft) elect(term int32) {
@@ -493,7 +517,7 @@ func (rf *Raft) ticker() {
 		case <-rf.heartbeatTimer.C:
 			rf.mu.Lock()
 			if rf.state == LEADER {
-				rf.heartbeatTimer.Reset(time.Duration(100) * time.Millisecond)
+				rf.heartbeatTimer.Reset(time.Duration(BASIC_INTERVAL) * time.Millisecond)
 				go rf.broadcast(rf.currentTerm)
 			} else {
 				rf.heartbeatTimer.Stop()
@@ -567,8 +591,6 @@ func Make(peers []*raftpb.ClientEnd, me int32,
 					rf.mu.Unlock()
 				}
 			} else {
-				log.Printf("%d[%d] snapshot %v", rf.me, rf.currentTerm, rf.snapshot)
-				log.Printf("%d[%d] log %v %v", rf.me, rf.currentTerm, rf.log, rf.lastApplied)
 				applyMsg := ApplyMsg{
 					CommandValid:  false,
 					SnapshotValid: true,

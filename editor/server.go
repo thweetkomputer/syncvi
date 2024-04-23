@@ -20,8 +20,7 @@ type Server struct {
 	me      int32
 	rf      *raft.Raft
 	applyCh chan raft.ApplyMsg
-	msgCh   chan []byte
-	ownCh   chan []byte
+	msgCh   chan interface{}
 
 	maxraftstate int // snapshot if log grows this big
 
@@ -71,49 +70,44 @@ func (s *Server) processOp() {
 	for {
 		msg := <-s.applyCh
 		if msg.CommandValid {
-			var op Op
-			op = deserializeOp(msg.Command.([]byte))
 			s.mu.Lock()
-			if s.ops[op.CkId] >= op.Seq {
-				s.commitCond.Broadcast()
-				s.mu.Unlock()
-				continue
+			var op Op
+			if len(msg.Command) > 0 {
+				op = deserializeOp(msg.Command)
+				if s.ops[op.CkId] >= op.Seq {
+					s.commitCond.Broadcast()
+					s.mu.Unlock()
+					continue
+				}
 			}
-			diff := op.Diff
-			if len(diff) > 0 {
-				s.ownCh <- diff
+			dif := op.Diff
+			if len(dif) > 0 {
+				s.data = patch(s.data, dif)
 			}
+			s.msgCh <- struct{}{}
 			s.logTerm[msg.CommandIndex] = msg.CommandTerm
 			s.commitIndex = msg.CommandIndex
 			s.ops[op.CkId] = op.Seq
 			if s.maxraftstate != -1 && s.persister.RaftStateSize() > s.maxraftstate {
-				log.Printf("server[%d] snapshot", s.me)
-				// TODO
-				//w := new(bytes.Buffer)
-				//e := labgob.NewEncoder(w)
-				//e.Encode(kv.data)
-				//e.Encode(kv.ops)
-				//kv.rf.Snapshot(kv.commitIndex, w.Bytes())
+				w := new(bytes.Buffer)
+				e := gob.NewEncoder(w)
+				e.Encode(s.data)
+				e.Encode(s.ops)
+				s.rf.Snapshot(s.commitIndex, w.Bytes())
 			}
 			s.commitCond.Broadcast()
 			s.mu.Unlock()
 		} else if msg.SnapshotValid {
-			// TODO
-			//s.mu.Lock()
-			//snapshot := msg.Snapshot
-			//r := bytes.NewBuffer(snapshot)
-			//d := labgob.NewDecoder(r)
-			//var data map[string]string
-			//var ops map[int64]int64
-			//if d.Decode(&data) != nil || d.Decode(&ops) != nil {
-			//	log.Fatal("decode error")
-			//} else {
-			//	kv.data = data
-			//	kv.ops = ops
-			//}
-			//kv.commitIndex = msg.SnapshotIndex
-			//DPrintf("server[%d] commitIndex %d", kv.me, kv.commitIndex)
-			//kv.mu.Unlock()
+			s.mu.Lock()
+			snapshot := msg.Snapshot
+			r := bytes.NewBuffer(snapshot)
+			d := gob.NewDecoder(r)
+			if d.Decode(&s.data) != nil {
+				log.Fatal("decode error")
+			}
+			s.commitIndex = msg.SnapshotIndex
+			s.mu.Unlock()
+			s.msgCh <- struct{}{}
 		}
 	}
 }
@@ -152,26 +146,33 @@ func (s *Server) Do(ctx context.Context, req *editorpb.DoRequest) (*editorpb.DoR
 }
 
 func StartServer(peers []*raftpb.ClientEnd, nodes []*ClientEnd, me int32,
-	persister raft.Persister, msgCh chan []byte) *Server {
+	persister raft.Persister, msgCh chan interface{}) *Server {
 	applyCh := make(chan raft.ApplyMsg)
 	s := &Server{
 		me:           me,
 		rf:           raft.Make(peers, me, persister, applyCh),
 		applyCh:      applyCh,
 		msgCh:        msgCh,
-		maxraftstate: -1,
+		maxraftstate: 1024,
 		data:         make([]rune, 0),
 		ops:          make(map[int32]int64),
 		logTerm:      make(map[int32]int32),
 		persister:    persister,
 		commitIndex:  0,
 	}
-	s.ownCh = make(chan []byte)
-	go func() {
-		for msg := range s.ownCh {
-			msgCh <- msg
+	snapshot := s.persister.ReadSnapshot()
+	if snapshot != nil && len(snapshot) > 0 {
+		r := bytes.NewBuffer(snapshot)
+		d := gob.NewDecoder(r)
+		var data []rune
+		var ops map[int32]int64
+		if d.Decode(&data) != nil || d.Decode(&ops) != nil {
+			log.Fatal("decode error")
+		} else {
+			s.data = data
+			s.ops = ops
 		}
-	}()
+	}
 	s.mu = sync.Mutex{}
 	s.commitCond = sync.NewCond(&s.mu)
 	ip := nodes[me].Ip
