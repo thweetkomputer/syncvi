@@ -5,7 +5,6 @@ import (
 	"context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	"log"
 	"strings"
 	"time"
 )
@@ -32,7 +31,6 @@ func MakeClient(servers []*ClientEnd, me int32, seq int64) *Client {
 }
 
 func (ck *Client) Do(ctx context.Context, diff []byte) {
-	log.Printf("Client %d: Do %v", ck.id, diff)
 	ck.requestSeq++
 	args := &editorpb.DoRequest{
 		Diff: diff,

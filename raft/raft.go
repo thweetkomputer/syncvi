@@ -397,7 +397,6 @@ func (rf *Raft) broadcast(term int32) {
 				rf.mu.Unlock()
 				reply, err := rf.SendAppendEntries(server, args)
 				if err != nil {
-					log.Printf("%d[%d] SendAppendEntries %d error %v", rf.me, rf.currentTerm, server, err)
 					return
 				}
 				rf.mu.Lock()
@@ -570,7 +569,6 @@ func Make(peers []*raftpb.ClientEnd, me int32,
 	go func() {
 		for {
 			rf.mu.Lock()
-			log.Printf("%d[%d] lastApplied %d commitIndex %d", rf.me, rf.currentTerm, rf.lastApplied, rf.commitIndex)
 			for rf.commitIndex <= rf.lastApplied {
 				rf.applyCond.Wait()
 			}
@@ -588,14 +586,11 @@ func Make(peers []*raftpb.ClientEnd, me int32,
 				rf.mu.Unlock()
 				for i := 0; i < len(applyMsgs); i++ {
 					applyCh <- applyMsgs[i]
-					log.Printf("%d[%d] apply %d %v", rf.me, rf.currentTerm, applyMsgs[i].CommandIndex, applyMsgs[i].Command)
 					rf.mu.Lock()
 					rf.lastApplied++
 					rf.mu.Unlock()
 				}
 			} else {
-				log.Printf("%d[%d] snapshot %v", rf.me, rf.currentTerm, rf.snapshot)
-				log.Printf("%d[%d] log %v %v", rf.me, rf.currentTerm, rf.log, rf.lastApplied)
 				applyMsg := ApplyMsg{
 					CommandValid:  false,
 					SnapshotValid: true,

@@ -184,6 +184,9 @@ func handleKeyPress(ev termbox.Event) {
 			newBuffer = append(newBuffer, ev.Ch)
 			newBuffer = append(newBuffer, buffer[insertIndex:]...)
 			updateLineStarts()
+			if cursorX < 0 {
+				cursorX = 0
+			}
 			cursorX++
 			w, _ := termbox.Size()
 			if cursorX > w-1 {
@@ -227,7 +230,7 @@ func moveCursorUp() {
 }
 
 func moveCursorDown(startFromBegin bool) {
-	if cursorY+viewOffsetY >= len(lineStarts)-2 {
+	if cursorY+viewOffsetY >= len(lineStarts)-1 {
 		return
 	}
 	if startFromBegin {
@@ -346,6 +349,7 @@ var server *Server
 var client *Client
 
 func StartEditor(path string, raftPeers string, nodes string, me int32, logPath string) {
+	lineStarts = []int{0, 0}
 	msgCh := make(chan interface{}, 1024)
 	persister := storage.MakeGoBPersister(logPath + "/" + strconv.Itoa(int(me)))
 	server = StartServer(raftpb.ParseClientEnd(raftPeers), ParseClientEnd(nodes), me, persister, msgCh)
