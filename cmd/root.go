@@ -45,7 +45,7 @@ var startCmd = &cobra.Command{
 
 var cleanCmd = &cobra.Command{
 	Use:   "clean",
-	Short: "Clean the editor",
+	Short: "Clean the editor before starting a new document",
 	Run: func(cmd *cobra.Command, args []string) {
 		editor.Clean(dataDir)
 	},
