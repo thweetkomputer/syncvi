@@ -41,8 +41,25 @@ func updateLineStarts() {
 	}
 }
 
+func valid(ev termbox.Event) bool {
+	if ev.Key == termbox.KeyEsc ||
+		ev.Key == termbox.KeyBackspace ||
+		ev.Key == termbox.KeyBackspace2 ||
+		ev.Key == termbox.KeySpace ||
+		ev.Key == termbox.KeyEnter {
+		return true
+	}
+	if ev.Ch >= 32 && ev.Ch <= 126 {
+		return true
+	}
+	return false
+}
+
 func tryHandleKeyPress(ev termbox.Event) bool {
 	defer render()
+	if !valid(ev) {
+		return true
+	}
 	switch mode {
 	case ModeNormal:
 		if ev.Ch == ':' {
@@ -381,4 +398,8 @@ func StartEditor(path string, raftPeers string, nodes string, me int32, logPath 
 			render()
 		}
 	}
+}
+
+func Clean(dataDir string) {
+	os.RemoveAll(dataDir)
 }
