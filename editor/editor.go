@@ -399,3 +399,7 @@ func StartEditor(path string, raftPeers string, nodes string, me int32, logPath 
 		}
 	}
 }
+
+func Clean(dataDir string) {
+	os.RemoveAll(dataDir)
+}
