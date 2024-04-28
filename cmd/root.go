@@ -35,11 +35,20 @@ var raftPeers string
 var nodes string
 var dataDir string
 
+func userHomeDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return home + "/"
+
+}
+
 func init() {
 	rootCmd.Flags().StringVarP(&raftPeers, "peers", "p", "localhost:22222", "Raft peers")
 	rootCmd.Flags().StringVarP(&nodes, "nodes", "n", "localhost:23333", "Nodes")
 	rootCmd.Flags().Int32VarP(&me, "me", "m", 0, "Index of the current node")
-	rootCmd.Flags().StringVarP(&dataDir, "data-dir", "d", ".syncvi", "Directory to store data")
+	rootCmd.Flags().StringVarP(&dataDir, "data-dir", "d", userHomeDir()+"/.syncvi", "Directory to store data")
 }
 
 func Execute() {
