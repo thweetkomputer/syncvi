@@ -6,6 +6,8 @@ Syncvi is a distributed terminal editor using Raft implemented by Golang.
 
 Run `make` to build it.
 
+Run `go install` to install it.
+
 The following command can be used to collaboratively edit a file with 3 members.
 
 Every one runs `syncvi clean` to clean the data.
@@ -24,7 +26,7 @@ For the third member:
 syncvi start t --peers=127.0.0.1:8888,127.0.0.1:8889,127.0.0.1:8890 --nodes=127.0.0.1:18888,127.0.0.1:18889,127.0.0.1:18890 --me=2
 ```
 
-Run `./syncvi -h` to see how to use it in detail.
+Run `syncvi -h` to see how to use it in detail.
 
 ## Structure
 
