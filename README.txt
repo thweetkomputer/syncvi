@@ -1,9 +1,9 @@
 Authors: Chen Zhao, Lezhou Lang
 
-Syncvi
+SyncVi
 ======
 
-Syncvi is a distributed, collaborative terminal text editor implementing the Raft consensus algorithm, written in Go.
+SyncVi is a distributed, collaborative terminal text editor implementing the Raft consensus algorithm, written in Go.
 
 Installation and Building
 =========================
