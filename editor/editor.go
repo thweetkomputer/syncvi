@@ -1,13 +1,13 @@
 package editor
 
 import (
-	raftpb "comp90020-assignment/raft/rpc"
-	"comp90020-assignment/storage"
 	"context"
 	"github.com/nsf/termbox-go"
 	"log"
 	"os"
 	"strconv"
+	raftpb "syncvi/raft/rpc"
+	"syncvi/storage"
 )
 
 const (

@@ -1,6 +1,6 @@
 package main
 
-import "comp90020-assignment/cmd"
+import "syncvi/cmd"
 
 func main() {
 	cmd.Execute()

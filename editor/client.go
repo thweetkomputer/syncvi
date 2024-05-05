@@ -1,11 +1,11 @@
 package editor
 
 import (
-	"comp90020-assignment/editor/rpc"
 	"context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"strings"
+	"syncvi/editor/rpc"
 	"time"
 )
 

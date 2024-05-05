@@ -1,13 +1,13 @@
 package cmd
 
 import (
-	"comp90020-assignment/editor"
 	"fmt"
 	"github.com/spf13/cobra"
 	"io"
 	"log"
 	"os"
 	"strconv"
+	"syncvi/editor"
 )
 
 var rootCmd = &cobra.Command{

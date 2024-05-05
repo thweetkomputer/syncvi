@@ -2,9 +2,6 @@ package editor
 
 import (
 	"bytes"
-	editorpb "comp90020-assignment/editor/rpc"
-	"comp90020-assignment/raft"
-	raftpb "comp90020-assignment/raft/rpc"
 	"context"
 	"encoding/gob"
 	"fmt"
@@ -13,6 +10,9 @@ import (
 	"net"
 	"os"
 	"sync"
+	editorpb "syncvi/editor/rpc"
+	"syncvi/raft"
+	raftpb "syncvi/raft/rpc"
 )
 
 type Server struct {

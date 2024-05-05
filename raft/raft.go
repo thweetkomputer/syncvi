@@ -2,7 +2,6 @@ package raft
 
 import (
 	"bytes"
-	"comp90020-assignment/raft/rpc"
 	"context"
 	"encoding/gob"
 	"fmt"
@@ -12,6 +11,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"syncvi/raft/rpc"
 	"time"
 )
 
