@@ -11,7 +11,7 @@ Run `./syncvi -h` to see how to use it.
 ## Structure
 
 - `cmd` package defines the command line interface.
-- `raft` package implements the Raft algorithm and defines the storage interface.
-- `editor` package implements the terminal editor and contains some tools like diff.
+- `raft` package implements the Raft algorithm and the RPC server in raft layer and defines the storage interface.
+- `editor` package implements the terminal editor and the RPC server in application layer and contains some tools like diff.
 - `storage` package implements the storage interface of raft.
 
