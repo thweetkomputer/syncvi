@@ -1,4 +1,4 @@
-module comp90020-assignment
+module syncvi
 
 go 1.22.1
 
